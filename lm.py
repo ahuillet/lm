@@ -201,6 +201,8 @@ def parse_arguments():
     parser.add_argument('--download',
             help="Look for available subtitles for specific language.\
                     Use ISO639-1 codes, like eng/fre/dut/ger")
+    parser.add_argument('-i', '--imdb-id', action="store_true",
+            help="Display the IMDB movie ID")
     parser.add_argument('-s', '--show-imdb', action="store_true",
             help="Show IMDb webpage of each movie in default navigator\
                     (don't use if you're listing a lot of files!)")
@@ -1457,6 +1459,12 @@ class ListMovies():
             if h['m_id']:
                 webbrowser.open_new_tab(imdb.imdbURL_movie_main % h['m_id'])
 
+    def imdb_id(self, files):
+        for f in files:
+            h = self.hash_from_path(f)
+            if h['m_id']:
+                print(h['m_id'])
+
 if __name__ == "__main__":
 
     consoleLogging( LOG_FORMAT, logging.ERROR )
@@ -1520,6 +1528,9 @@ if __name__ == "__main__":
 
     elif options.show_imdb:
         LM.imdb_show(files)
+
+    elif options.imdb_id:
+        LM.imdb_id(files)
 
     else:
         LM.show_list( files )
