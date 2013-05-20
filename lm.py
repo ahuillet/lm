@@ -442,6 +442,7 @@ class ListMovies():
             'm_votes'             : None,
             'm_cover'             : None,
             'm_last_update'       : None,
+            'm_runtime'           : None,
             'o_imdb_id'           : None,
             'o_year'              : None,
             'o_check'             : 0,
@@ -783,7 +784,7 @@ class ListMovies():
             imdb_id = cache_hash[cur_hash]['o_imdb_id']
 
             if imdb_id:
-                self.log.info("IMDb id stored from Opensubtites %s" % imdb_id)
+                self.log.info("IMDb id stored from Opensubtitles %s" % imdb_id)
                 result = self.i.get_movie(imdb_id)
                 if result:
                     self.__fill_metadata( cur_hash, result )
@@ -937,6 +938,7 @@ class ListMovies():
                     (found.get('cast') or [])]
             current['m_votes'] = found.get('votes')
             current['m_cover'] = found.get('cover url') or []
+            current['m_runtime'] = found.get('runtime') or [""]
 
         else:
             current.update({
@@ -945,7 +947,7 @@ class ListMovies():
                     'm_genre':[],'m_countries':[],
                     'm_director':[], 'm_cast':[], 'm_cover':[],
                     'm_votes':0, 'm_summary':'.'*20,'m_rating':0,
-                    'm_year':1900,'m_short_summary':'.'*20})
+                    'm_year':1900,'m_short_summary':'.'*20,'m_runtime':[""]})
 
 
     # ********** MANUAL CONFIRMATION *****************************************
@@ -1374,12 +1376,13 @@ class ListMovies():
                        'filename':os.path.basename(filename),
                        'director':', '.join(h['m_director']),
                        'size': str(int(h['bytesize'] / (1024*1024))) \
-                               if h['bytesize'] else None
+                               if h['bytesize'] else None,
+                       'runtime': str(h['m_runtime'][0])
                       }
 
         if self.disp_very_long:
             out_str  =u"%(header)s%(title)s (%(b)srating%(e)s: %(rating)s)\n%"
-            out_str +="(b)syear%(e)s: %(year)s %(b)sgenre%(e)s: %(genre)s\n%"
+            out_str +="(b)sruntime%(e)s: %(runtime)s (b)syear%(e)s: %(year)s %(b)sgenre%(e)s: %(genre)s\n%"
             out_str +="(b)sfile%(e)s: %(filename)s %(b)ssize%(e)s: %(size)sMo"
             out_str +="\n%(b)sdirector%(e)s: %(director)s\n"
             out_str = out_str % values_dict
@@ -1397,8 +1400,8 @@ class ListMovies():
             out_str += "\n" + self.BLUE + "summary"+self.END+": %s\n---\n" % \
                     h['m_summary']
         elif self.disp_long:
-            out_str = u"%(header)s%(title)s (%(year)s,%(rating)s,%(size)sMo) "
-            out_str += "[%(b)s%(genre)s%(e)s] from %(director)s: "
+            out_str = u"%(header)s%(title)s (%(runtime)s min,%(rating)s,%(size)sMo) "
+            out_str += "[%(b)s%(genre)s%(e)s]: "
             out_str += "%(filename)s\n"
             out_str = out_str % values_dict
         else:
@@ -1414,7 +1417,8 @@ class ListMovies():
         cell = u"<td width=200 height=250><a href=\"%(imdb)s\">\
            %(title)s</a><br> \
            <font color=%(color)s>%(genre)s<br>\
-           note: %(rating)s, votes: %(votes)s<br>\
+           note: %(rating)s<br>\
+           length: %(runtime)s min<br>\
            size: %(size)iMo</font><br>\
            <a href='%(trailer)s'><img src='%(cover)s' height=150></a><br>\
            <small>%(file)s</small></td>\n"
@@ -1437,6 +1441,7 @@ class ListMovies():
                         'title': h['m_title'],
                         'color': '#FF3333' if h['g_unsure'] else '#808080',
                         'rating' : str(h['m_rating']) or 'None',
+                        'runtime' : str(h['m_runtime'][0]),
                         'votes': str(round(h['m_votes']/1000,1))+'K' if \
                                 h['m_votes'] else 'None',
                         'cover': h['m_cover'],
