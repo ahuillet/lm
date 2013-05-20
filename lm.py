@@ -372,7 +372,7 @@ class ListMovies():
             self.filter_dict = options.filter_dict if options.filter else None
             self.disp_long = options.long
             self.disp_very_long = options.very_long
-            self.disp_outline = options.outline
+            self.disp_outline = options.outline or options.long
 
         self.log = logging.getLogger("LM")
         self.log.addHandler( NullHandler() )
@@ -1365,9 +1365,10 @@ class ListMovies():
 
         values_dict = {'b':self.BLUE,
                        'e':self.END,
+                       'm':self.MAGEN,
                        'header':self.RED + '/!\\ ' + self.END if \
                                h['g_unsure'] else '',
-                       'title':(self.MAGEN if h['o_imdb_id'] \
+                       'title':(self.BLUE if h['o_imdb_id'] \
                                else self.YELLOW)+to_ascii(h['m_title'])+\
                                self.END,
                        'rating':str(h['m_rating']),
@@ -1400,9 +1401,9 @@ class ListMovies():
             out_str += "\n" + self.BLUE + "summary"+self.END+": %s\n---\n" % \
                     h['m_summary']
         elif self.disp_long:
-            out_str = u"%(header)s%(title)s (%(runtime)s min,%(rating)s,%(size)sMo) "
-            out_str += "[%(b)s%(genre)s%(e)s]: "
-            out_str += "%(filename)s\n"
+            out_str = u"%(header)s%(title)s (%(runtime)s min, %(rating)s) "
+            out_str += "[%(genre)s]: "
+            out_str += "%(m)s%(filename)s%(e)s\n"
             out_str = out_str % values_dict
         else:
             out_str = u"%(header)s%(title)s (%(filename)s)\n" % values_dict
@@ -1419,7 +1420,7 @@ class ListMovies():
            <font color=%(color)s>%(genre)s<br>\
            note: %(rating)s<br>\
            length: %(runtime)s min<br>\
-           size: %(size)iMo</font><br>\
+           summary: %(summary)s</font><br>\
            <a href='%(trailer)s'><img src='%(cover)s' height=150></a><br>\
            <small>%(file)s</small></td>\n"
 
@@ -1447,7 +1448,8 @@ class ListMovies():
                         'cover': h['m_cover'],
                         'genre': ', '.join(h['m_genre'][0:2]),
                      'trailer':'http://www.youtube.com/results?search_query='+
-                                alphanum( h['m_title'],'+')+'+trailer'
+                                alphanum( h['m_title'],'+')+'+trailer',
+                        'summary': h['m_short_summary'] or 'None',
                                 }
                     # print values_dict
                     finalcell = cell % values_dict
