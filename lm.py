@@ -167,6 +167,9 @@ def parse_arguments():
     parser.add_argument('-a','--alphabetical',
             action="store_true",default=False,
             help="sort by alphabetical order of title instead of rating")
+    parser.add_argument('-D','--sort_duration',
+            action="store_true",default=False,
+            help="sort by duration of movie instead of rating")
     parser.add_argument('-r','--reverse',
             action="store_true", default=False,
             help="show media in reverse order")
@@ -341,6 +344,7 @@ class ListMovies():
 
         if options:
             self.order_alpha = options.alphabetical
+            self.order_duration = options.sort_duration
             self.order_reverse = options.reverse
             self.filter_phrase = options.filter
             self.filter_dict = options.filter_dict if options.filter else None
@@ -550,7 +554,6 @@ class ListMovies():
 
         cache_path = self.cache_path
         cache_hash = self.cache_hash
-        print(cache_path)
         for path in abs_paths:
 
             if not( path in cache_path and \
@@ -592,7 +595,6 @@ class ListMovies():
 
 
 
-        print(hashs)
         data = self.get_info_from_opensubtitles( hashs )
 
         for h in hashs:
@@ -727,11 +729,9 @@ class ListMovies():
             if p_info:
                 path, c_time = p_info['path'], p_info['cache_time']
                 updt_after   = not v['o_title'] and v['m_last_update'] < c_time
-                print(v['o_title'], v['m_last_update'], updt_after)
                 path_exists  = os.path.exists(path)
 
                 if path_exists and (v['m_last_update'] == 0.0 or updt_after):
-                    print(p_info)
                     hashs.append(h)
 
         idx, last_len, total = 1, 0, len(hashs)
@@ -1316,6 +1316,8 @@ class ListMovies():
 
         if self.order_alpha:
             keyword = 'm_canonical_title'
+        elif self.order_duration:
+            keyword = 'm_runtime'
         else:
             keyword = 'm_rating'
 
@@ -1362,7 +1364,8 @@ class ListMovies():
                        'director':', '.join(h['m_director']),
                        'size': str(int(h['bytesize'] / (1024*1024))) \
                                if h['bytesize'] else None,
-                       'runtime': str(h['m_runtime'][0])
+                       'runtime': str(h['m_runtime'][0]),
+                       'link' : 'https://www.imdb.com/title/tt'+h['m_id']
                       }
 
         if self.disp_very_long:
@@ -1386,7 +1389,7 @@ class ListMovies():
                     h['m_summary']
         elif self.disp_long:
             out_str = u"%(header)s%(title)s (%(runtime)s min, %(rating)s) "
-            out_str += "[%(genre)s]: "
+            out_str += "[%(genre)s] %(link)s "
             out_str += "%(m)s%(filename)s%(e)s\n"
             out_str = out_str % values_dict
         else:
