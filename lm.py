@@ -34,9 +34,14 @@ import locale
 import logging
 import pickle
 import argparse
-import xmlrpc.client as xmlrpclib
 from difflib import SequenceMatcher
 from unicodedata import normalize
+import requests
+import json
+import subprocess
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QHeaderView, QPushButton
+from PyQt5.QtCore import Qt, QUrl
+from PyQt5.QtGui import QColor, QFont, QDesktopServices
 
 # windows terminal coloration
 from platform import system
@@ -152,11 +157,11 @@ def alphanum( string, fill=' ' ):
 def to_ascii( string ):
     return (normalize( 'NFKD', string ).encode('ascii', 'ignore')).decode('ascii')
 
-# boolean yes / no raw_input
+# boolean yes / no input
 def boolean_input(msg):
     res = None
     while res not in ['y','n']:
-        res = raw_input( msg + ' (y/n):').lower()
+        res = input( msg + ' (y/n):').lower()
     return( res=='y')
 
 # ********** ARGUMENTS HANDLER ***********************************************
@@ -195,11 +200,6 @@ def parse_arguments():
             help="Manually confirm/search selected movies. May be usefull\
                     to ask for unsure movies only (ie with bad imdb match)\
                     with '-f @unsure' argument")
-    parser.add_argument('--upload', default=False,
-            action="store_true",
-            help="Individually upload hash info to opensubtitles. Only\
-                    files without opensubtitles correspondance will be\
-                    selected")
     parser.add_argument('--download',
             help="Look for available subtitles for specific language.\
                     Use ISO639-1 codes, like eng/fre/dut/ger")
@@ -221,18 +221,18 @@ def parse_arguments():
                      ~/.lm/lm_log.txt")
     parser.add_argument('--version', action="store_true",
             help="Display current version")
+    parser.add_argument('--qt', action="store_true", help="Use PyQt interface to display and select movies")
 
     options = parser.parse_args()
 
     args = options.files
 
 
-    if options.delete_cache +  options.confirm + \
-            options.upload >1 :
-        logger.error("please choose ONE only from upload/confirm/delete")
+    if options.delete_cache +  options.confirm >1 :
+        logger.error("please choose ONE only from confirm/delete")
         exit(2)
 
-    if options.confirm or options.upload:
+    if options.confirm:
         options.long = True
 
     # take care of the 'unsure' filter
@@ -372,10 +372,6 @@ class ListMovies():
         self.load_cache_hash()
 
         self.i = imdb.IMDb()
-
-        # opensubtitles XMLRPC server and tokern
-        self.server = None
-        self.token  = None
 
         # terminal coloration
         self.RED    = "\033[00;31m"
@@ -606,9 +602,9 @@ class ListMovies():
                 info = data[h]
                 if info:
                     try:
-                        open_info = {'o_imdb_id':info['MovieImdbID'],
-                                       'o_title':info['MovieName'],
-                                        'o_year':info['MovieYear']}
+                        open_info = {'o_imdb_id':info['imdb_id'],
+                                       'o_title':info['movie_name'],
+                                        'o_year':info['year']}
                         cache[h].update( open_info )
 
                     except:
@@ -635,57 +631,45 @@ class ListMovies():
         finally:
             return( status )
 
-    def login(self, user="", password=""):
-        try:
-            server = xmlrpclib.ServerProxy(OPENSUBTITLE_DOMAIN)
-            log    = server.LogIn(user,password,'en',OPENSUBTITLE_USER_AGENT)
-
-            if self.status_ok(log):
-                self.log.debug("OpenSubtitles login OK")
-                self.server = server
-                self.token  = log['token']
-            else:
-                raise LoginError(str(log))
-
-        except LoginError as e:
-            self.log.warning( str(e)  )
-
-        except Exception as e:
-            self.log.error("OpenSubtitles login process DOWN: %s" % str(e))
-
-
-    def logout(self):
-        if self.token:
-            try:
-                self.server.LogOut(self.token)
-                self.log.debug("OpenSubtitles logout OK")
-            except Exception as e:
-                self.log.warning("OpenSubtitles logout process DOWN, %s" % \
-                        str(e))
-
     # retrive general info for a list of movie hash
     def get_info_from_opensubtitles( self, hashs ):
-            data = {}
+        url = "https://api.opensubtitles.com/api/v1/subtitles"
+        headers = {"Content-Type": "application/json", "Api-Key": read_api_key(), "User-Agent": "LM-Reborn v0.1"}
+        data = {}
 
-            if len(hashs)>0:
-                self.log.info("request OpenSubtitle info for %d hashes" %\
-                        len(hashs))
+        if len(hashs)>0:
+            self.log.info("request OpenSubtitle info for %d hashes" %\
+                    len(hashs))
+            for h in hashs:
+                if not h:
+                    continue
+
+                params = {"moviehash": h}
                 try:
-                    self.login()
-                    for k in range(0, int(len(hashs)/150+1)):
-                        res = self.server.CheckMovieHash( self.token,
-                                hashs[150*k:(150*(k+1))] )
-                        data.update( res['data'] )
-                    self.logout()
-                except LoginError:
-                    self.log.debug("Error when retrieving hash " + \
-                            "from opensubtitles")
-                    pass
+                    response = requests.get(url, params=params, headers=headers)
+                    time.sleep(0.2) # rate limit is 5/second
+                    if response.status_code != 200:
+                        if response.status_code == 401:
+                            print('Unauthorized: Check your API key.')
+                        elif response.status_code == 429:
+                            print('Rate limit exceeded: Slow down your requests.')
+                        else:
+                            print(f'API error: {params} {headers} : {response.status_code} - {response.text}')
+                        continue
+                except requests.exceptions.RequestException as e:
+                    print(f'Request failed: {str(e)}')
+                    continue
 
-                for k, v in data.items():
-                    if len(v)==0: data[k]=None
+                res = response.json()
+                try:
+                    res = res['data'][0]['attributes']['feature_details']
+                except IndexError:
+                    print(f"Could not find opensubtitles results for hash {h} despite successful request {res}")
+                    continue
 
-            return(data)
+                data[h] = res
+
+        return data
 
     def path_from_hash(self, cur_hash):
     # Returns the lastest modified file in cache_path pointing to this hash
@@ -976,11 +960,11 @@ class ListMovies():
 
             input_id = boolean_input("Will you provide an IMDb id?")
             if input_id:
-                imdb_id =raw_input('please enter the IMDb id for this movie:')
+                imdb_id =input('please enter the IMDb id for this movie:')
                 result = self.i.get_movie(imdb_id)
             else:
-                title =raw_input('please enter movie title:')
-                year  =raw_input('please enter year, leave blank if unknown:')
+                title =input('please enter movie title:')
+                year  =input('please enter year, leave blank if unknown:')
                 if year=='':
                     year = None
                 result, unsure = self.best_match( title, year )
@@ -1007,53 +991,6 @@ class ListMovies():
             print( "Connexion error")
             print(e)
             return( self.__manual_confirm( f, ask=True ) )
-
-    # ********** UPLOAD HASH TO OPENSUBTITLES ********************************
-    def upload_to_opensubtitles(self, files):
-    # filter a list of files to get only those which hash was not
-    # found in opensubtitles, and will ask the user if he wants to
-    # send the couple (imdb_id, hash) to opensubtitles.
-    # @param files: a list of absolute path
-
-        files = [ f for f in files if \
-                    not self.cache_hash[
-                        self.cache_path[f]['hash']]['o_imdb_id']]
-        if len(files)>0:
-
-            to_upload = []
-            for f in files:
-
-                cur_hash = self.cache_path[f]['hash']
-                imdb_id  = self.cache_hash[cur_hash]['m_id']
-                bytesize = str(self.cache_hash[cur_hash]['bytesize'])
-
-                self.pretty_print(f)
-                msg = "Do you want to send hash info to opensubtitles?"
-                insert = boolean_input(msg)
-                if insert:
-                    to_upload.append( { 'moviehash':cur_hash,
-                                    'moviebytesize':bytesize,
-                                           'imdbid':imdb_id } )
-
-            if len(to_upload)>0:
-                try:
-                    self.login()
-                    call = self.server.InsertMovieHash( self.token, to_upload)
-                    print( call )
-                    logout = self.logout()
-
-                    for v in to_upload:
-                        h = v['moviehash']
-                        self.cache_hash[h]['o_check'] = None
-
-                    self.save_cache()
-
-                except Exception as e:
-                    print("!!! Error when uploading hash to opensubtitles")
-                    print( e )
-                    if self.token:
-                        logout = self.logout()
-                        print( 'LOGOUT ***', logout )
 
     # ********** DOWNLOAD SUBTITLES FROM OPENSUBTITLES ***********************
 
@@ -1100,7 +1037,7 @@ class ListMovies():
         for f in files:
 
             # check if we already downloaded subtitles for this movie
-            pattern = lang.upper() + "_LM[\d]{1,}\.srt$"
+            pattern = lang.upper() + r"_LM[\d]{1,}\.srt$"
             filedir = os.path.dirname(f)
             old_subs = [ old for old in filelist(filedir,False) \
                     if re.search(pattern, old) ]
@@ -1311,6 +1248,12 @@ class ListMovies():
     # filter the list of files,
     # according to video extensions provided, and user filters
 
+        def safe_sort_key(f, keyword):
+            if not self.hash_from_path(f)[keyword]:
+                print(f"Warning: File '{f}' is missing the '{keyword}' attribute or has an invalid value.")
+                return 0  # Default value
+            return self.hash_from_path(f)[keyword]
+
         if self.filter_phrase:
             files = self.user_filter(files)
 
@@ -1321,7 +1264,8 @@ class ListMovies():
         else:
             keyword = 'm_rating'
 
-        files.sort( key=lambda f: self.hash_from_path(f)[keyword],\
+        print(f"Sorting on keyword {keyword}")
+        files.sort( key=lambda f: safe_sort_key(f, keyword),\
                 reverse=self.order_reverse)
 
         return(files)
@@ -1334,6 +1278,8 @@ class ListMovies():
             self.log.error("this path doesnt belong to cash_path %s" % path )
             result      = dict()
 
+        if not result:
+            print(f"None hash for path {path}")
         return( result )
 
     # ********** DISPLAYERS **************************************************
@@ -1459,12 +1405,182 @@ class ListMovies():
             if h['m_id']:
                 print("tt" + h['m_id'])
 
+
+class MovieListWindow(QMainWindow):
+    def __init__(self, lm, files):
+        super().__init__()
+        self.lm = lm
+        self.files = files
+        self.initUI()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.close()
+        elif event.key() == Qt.Key_C and (event.modifiers() & Qt.ControlModifier):
+            self.close()
+
+    def initUI(self):
+        self.setWindowTitle('Movie List')
+        self.setGeometry(10, 10, 1800, 600)
+
+        layout = QVBoxLayout()
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels(['Title', 'Filename', 'IMDB', 'IMDB Rating', 'Runtime', 'Subtitles', 'Play'])
+        self.table.setRowCount(len(self.files))
+
+        # Set default column widths
+        self.table.setColumnWidth(0, 300)  # Title
+        self.table.setColumnWidth(1, 500)  # Filename
+        self.table.setColumnWidth(2, 300)  # IMDB Link
+        self.table.setColumnWidth(3, 90)   # IMDB Rating
+        self.table.setColumnWidth(4, 60)   # Runtime
+        self.table.setColumnWidth(5, 60)   # Subtitles
+        self.table.setColumnWidth(6, 60)   # Play
+
+        for row, f in enumerate(self.files):
+            h = self.lm.hash_from_path(f)
+            if h['m_id']:
+                # Title
+                title_item = QTableWidgetItem(h['m_title'])
+                title_item.setFlags(title_item.flags() & ~Qt.ItemIsEditable)
+                self.table.setItem(row, 0, title_item)
+
+                # Filename
+                filename_item = QTableWidgetItem(os.path.basename(f))
+                filename_item.setFlags(filename_item.flags() & ~Qt.ItemIsEditable)
+                self.table.setItem(row, 1, filename_item)
+
+                # IMDB Link
+                imdb_link = f"https://www.imdb.com/title/tt{h['m_id']}"
+                link_item = QTableWidgetItem(imdb_link)
+                link_item.setFlags(link_item.flags() & ~Qt.ItemIsEditable)
+                link_item.setForeground(QColor('blue'))
+                font = link_item.font()
+                font.setUnderline(True)
+                link_item.setFont(font)
+                self.table.setItem(row, 2, link_item)
+
+                # IMDB Rating
+                rating_item = QTableWidgetItem(str(h['m_rating']))
+                rating_item.setFlags(rating_item.flags() & ~Qt.ItemIsEditable)
+                rating_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)  # Align right
+                self.table.setItem(row, 3, rating_item)
+
+                # Runtime
+                runtime_item = QTableWidgetItem(str(h['m_runtime'][0]) + ' min')
+                runtime_item.setFlags(runtime_item.flags() & ~Qt.ItemIsEditable)
+                runtime_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)  # Align right
+                self.table.setItem(row, 4, runtime_item)
+
+                # Subtitles
+                has_subtitles = self.check_subtitles(f)
+                if has_subtitles:
+                    subtitle_item = QTableWidgetItem('✓')
+                    subtitle_item.setFlags(subtitle_item.flags() & ~Qt.ItemIsEditable)
+                    self.table.setItem(row, 5, subtitle_item)
+                else:
+                    osd_button = QPushButton('OSD')
+                    osd_button.clicked.connect(lambda _, file=f: self.run_osd(file))
+                    self.table.setCellWidget(row, 5, osd_button)
+
+                # Play button
+                play_button = QPushButton('Play')
+                play_button.clicked.connect(lambda _, file=f: self.play_movie(file))
+                self.table.setCellWidget(row, 6, play_button)
+
+        layout.addWidget(self.table)
+
+        container = QWidget()
+        container.setLayout(layout)
+        self.setCentralWidget(container)
+
+        self.table.cellClicked.connect(self.open_imdb_link)
+        header = self.table.horizontalHeader()
+        for i in range(header.count()):
+            header.setSectionResizeMode(i, QHeaderView.Interactive)
+        self.table.setSortingEnabled(True)
+#        self.table.resizeColumnsToContents()
+        self.table.horizontalHeader().setStretchLastSection(False)
+
+    def play_movie(self, file):
+        subprocess.run(["mpv", file])
+
+    def run_osd(self, file):
+        # I should really do this in-process, but osd works, so whatever
+        subprocess.run(["osd", file])
+        self.update_subtitles(file)
+
+    def open_imdb_link(self, row, column):
+        if column == 3:  # IMDB Link column
+            link = self.table.item(row, column).text()
+            QDesktopServices.openUrl(QUrl(link))
+
+    
+    def update_subtitles(self, file):
+        for row in range(self.table.rowCount()):
+            if self.table.item(row, 1).text() == os.path.basename(file):
+                if self.check_subtitles(file):
+                    self.table.removeCellWidget(row, 5)
+                    subtitle_item = QTableWidgetItem('✓')
+                    self.table.setItem(row, 5, subtitle_item)
+                break
+
+    def check_subtitles(self, file_path):
+        try:
+            result = subprocess.run(['mediainfo', '--Output=JSON', file_path], capture_output=True, text=True)
+            media_info = json.loads(result.stdout)
+            
+            subtitles = []
+            for track in media_info['media']['track']:
+                if track['@type'] == 'Text':
+                    subtitle_info = {
+                        'format': track.get('Format', 'Unknown'),
+                        'language': track.get('Language', 'Unknown')
+                    }
+                    subtitles.append(subtitle_info)
+            
+            if subtitles:
+                return "Internal (" + ", ".join([f"{s['format']} - {s['language']}" for s in subtitles]) + ")"
+            else:
+                # Check for external subtitle files
+                base_path = os.path.splitext(file_path)[0]
+                subtitle_extensions = ['.srt', '.sub', '.idx']
+                for ext in subtitle_extensions:
+                    if os.path.exists(base_path + ext):
+                        return f"External ({ext})"
+            
+            return None
+        except Exception as e:
+            print(f"Error checking subtitles for {file_path}: {str(e)}")
+            return None
+
+
+def qt_interface(lm, files):
+    app = QApplication(sys.argv)
+    window = MovieListWindow(lm, files)
+    window.show()
+    sys.exit(app.exec_())
+
+def read_api_key():
+    config_path = os.path.expanduser("~/.config/osd/osd.conf")
+    try:
+        with open(config_path, "r") as file:
+            for line in file:
+                if line.startswith("key = "):
+                    return line.split("=")[1].strip().strip('"')
+    except FileNotFoundError:
+        print(f"Configuration file not found: {config_path}")
+    return None
+
 if __name__ == "__main__":
 
     consoleLogging( LOG_FORMAT, logging.ERROR )
 
     options, args  = parse_arguments()
 
+    
     if options.debug:
         consoleLogging( LOG_FORMAT, logging.INFO)
 
@@ -1509,9 +1625,6 @@ if __name__ == "__main__":
     if options.confirm:
         LM.manual_confirm(files)
 
-    elif options.upload:
-        LM.upload_to_opensubtitles(files)
-
     elif options.download:
         LM.download_subtitle(files, options.download)
 
@@ -1519,13 +1632,12 @@ if __name__ == "__main__":
         LM.html_build(files)
         if options.show:
             LM.html_show()
-
     elif options.show_imdb:
         LM.imdb_show(files)
-
     elif options.imdb_id:
         LM.imdb_id(files)
-
+    elif options.qt:
+        qt_interface(LM, files)
     else:
         LM.show_list( files )
 
