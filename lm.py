@@ -39,9 +39,9 @@ from unicodedata import normalize
 import requests
 import json
 import subprocess
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QHeaderView, QPushButton
-from PyQt5.QtCore import Qt, QUrl
-from PyQt5.QtGui import QColor, QFont, QDesktopServices
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QHeaderView, QPushButton, QLabel
+from PyQt5.QtCore import Qt, QUrl, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QDesktopServices, QCursor
 
 # windows terminal coloration
 from platform import system
@@ -935,6 +935,7 @@ class ListMovies():
 
             update_count += self.__manual_confirm( f )
             print("\n%i movies updated" % update_count )
+        self.save_cache()
 
 
     def __manual_confirm( self, f, ask=False ):
@@ -953,6 +954,7 @@ class ListMovies():
 
             if self.cache_hash[cur_hash]['m_id'] != '000000':
                 self.pretty_print(f)
+                print(str(self.cache_hash[cur_hash]))
                 confirm = boolean_input("Do you confirm stored info?")
                 if confirm:
                     self.cache_hash[cur_hash]['g_unsure']=False
@@ -974,6 +976,7 @@ class ListMovies():
                 print( '--> movie found  year: %s' % result['year'] )
                 agree = boolean_input('Confirm this result?')
                 if agree:
+                    self.cache_hash[cur_hash]['o_imdb_id'] = imdb_id
                     self.__fill_metadata(cur_hash, result)
                     self.cache_hash[cur_hash].update(\
                         { 'g_title':result['title'],
@@ -1159,7 +1162,7 @@ class ListMovies():
                     self.log.debug("dir var type: %s" % type(real_path) )
 
                     result.extend( filelist(
-                        real_path, True, *self.file_ext ) )
+                        real_path, False, *self.file_ext ) )
                 elif os.path.isfile(real_path):
                     result.append(arg)
 
@@ -1300,9 +1303,8 @@ class ListMovies():
                        'm':self.MAGEN,
                        'header':self.RED + '/!\\ ' + self.END if \
                                h['g_unsure'] else '',
-                       'title':(self.BLUE if h['o_imdb_id'] \
-                               else self.YELLOW)+to_ascii(h['m_title'])+\
-                               self.END,
+                       'title':(self.BLUE + to_ascii(h['m_title'])+\
+                               self.END),
                        'rating':str(h['m_rating']),
                        'year':h['m_year'],
                        'genre':"%s" % ', '.join(h['m_genre']),
@@ -1405,6 +1407,26 @@ class ListMovies():
             if h['m_id']:
                 print("tt" + h['m_id'])
 
+class ClickableLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def __init__(self, text):
+        super().__init__(text)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet("color: blue; text-decoration: underline;")
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+
+class NumericTableWidgetItem(QTableWidgetItem):
+    def __init__(self, value):
+        super().__init__(str(value))
+        self.value = value
+
+    def __lt__(self, other):
+        if isinstance(other, NumericTableWidgetItem):
+            return self.value > other.value
+        return super().__lt__(other)
 
 class MovieListWindow(QMainWindow):
     def __init__(self, lm, files):
@@ -1454,13 +1476,9 @@ class MovieListWindow(QMainWindow):
 
                 # IMDB Link
                 imdb_link = f"https://www.imdb.com/title/tt{h['m_id']}"
-                link_item = QTableWidgetItem(imdb_link)
-                link_item.setFlags(link_item.flags() & ~Qt.ItemIsEditable)
-                link_item.setForeground(QColor('blue'))
-                font = link_item.font()
-                font.setUnderline(True)
-                link_item.setFont(font)
-                self.table.setItem(row, 2, link_item)
+                link_label = ClickableLabel(imdb_link)
+                link_label.clicked.connect(lambda url=imdb_link: self.open_imdb_link(url))
+                self.table.setCellWidget(row, 2, link_label)
 
                 # IMDB Rating
                 rating_item = QTableWidgetItem(str(h['m_rating']))
@@ -1469,9 +1487,10 @@ class MovieListWindow(QMainWindow):
                 self.table.setItem(row, 3, rating_item)
 
                 # Runtime
-                runtime_item = QTableWidgetItem(str(h['m_runtime'][0]) + ' min')
-                runtime_item.setFlags(runtime_item.flags() & ~Qt.ItemIsEditable)
-                runtime_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)  # Align right
+                runtime_value = int(h['m_runtime'][0]) if h['m_runtime'][0] else 0
+                runtime_item = NumericTableWidgetItem(runtime_value)
+                runtime_item.setData(Qt.DisplayRole, f"{runtime_value} min")
+                runtime_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.table.setItem(row, 4, runtime_item)
 
                 # Subtitles
@@ -1496,7 +1515,8 @@ class MovieListWindow(QMainWindow):
         container.setLayout(layout)
         self.setCentralWidget(container)
 
-        self.table.cellClicked.connect(self.open_imdb_link)
+        self.table.cellDoubleClicked.connect(self.on_cell_double_clicked)
+
         header = self.table.horizontalHeader()
         for i in range(header.count()):
             header.setSectionResizeMode(i, QHeaderView.Interactive)
@@ -1512,11 +1532,13 @@ class MovieListWindow(QMainWindow):
         subprocess.run(["osd", file])
         self.update_subtitles(file)
 
-    def open_imdb_link(self, row, column):
-        if column == 3:  # IMDB Link column
-            link = self.table.item(row, column).text()
-            QDesktopServices.openUrl(QUrl(link))
+    def open_imdb_link(self, url):
+        QDesktopServices.openUrl(QUrl(url))
 
+    def on_cell_double_clicked(self, row, column):
+        # Get the filename from the second column (index 1)
+        filename = self.table.item(row, 1).text()
+        self.play_movie(os.path.join(os.path.dirname(self.files[row]), filename))
     
     def update_subtitles(self, file):
         for row in range(self.table.rowCount()):
