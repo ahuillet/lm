@@ -39,7 +39,7 @@ from unicodedata import normalize
 import requests
 import json
 import subprocess
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QHeaderView, QPushButton, QLabel
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QHeaderView, QPushButton, QLabel, QToolTip
 from PyQt5.QtCore import Qt, QUrl, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QDesktopServices, QCursor
 
@@ -1267,7 +1267,6 @@ class ListMovies():
         else:
             keyword = 'm_rating'
 
-        print(f"Sorting on keyword {keyword}")
         files.sort( key=lambda f: safe_sort_key(f, keyword),\
                 reverse=self.order_reverse)
 
@@ -1451,6 +1450,7 @@ class MovieListWindow(QMainWindow):
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(['Title', 'Filename', 'IMDB', 'IMDB Rating', 'Runtime', 'Subtitles', 'Play'])
         self.table.setRowCount(len(self.files))
+        self.table.verticalHeader().setVisible(False)
 
         # Set default column widths
         self.table.setColumnWidth(0, 300)  # Title
@@ -1467,6 +1467,7 @@ class MovieListWindow(QMainWindow):
                 # Title
                 title_item = QTableWidgetItem(h['m_title'])
                 title_item.setFlags(title_item.flags() & ~Qt.ItemIsEditable)
+                title_item.setToolTip(h['m_short_summary'] or "No synopsis available")
                 self.table.setItem(row, 0, title_item)
 
                 # Filename
@@ -1642,24 +1643,25 @@ if __name__ == "__main__":
     LM.update_caches_with_paths( files )
     LM.update_cache_hash_opensubtitles()
     LM.update_cache_hash_metadata()
-    files = LM.filter_and_sort_files(files)
-
-    if options.confirm:
-        LM.manual_confirm(files)
-
-    elif options.download:
-        LM.download_subtitle(files, options.download)
-
-    elif options.show or options.html_build:
-        LM.html_build(files)
-        if options.show:
-            LM.html_show()
-    elif options.show_imdb:
-        LM.imdb_show(files)
-    elif options.imdb_id:
-        LM.imdb_id(files)
-    elif options.qt:
+    if options.qt:
         qt_interface(LM, files)
     else:
-        LM.show_list( files )
+        files = LM.filter_and_sort_files(files)
+
+        if options.confirm:
+            LM.manual_confirm(files)
+
+        elif options.download:
+            LM.download_subtitle(files, options.download)
+
+        elif options.show or options.html_build:
+            LM.html_build(files)
+            if options.show:
+                LM.html_show()
+        elif options.show_imdb:
+            LM.imdb_show(files)
+        elif options.imdb_id:
+            LM.imdb_id(files)
+        else:
+            LM.show_list( files )
 
