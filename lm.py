@@ -34,6 +34,7 @@ import locale
 import logging
 import pickle
 import argparse
+import datetime
 from difflib import SequenceMatcher
 from unicodedata import normalize
 import requests
@@ -576,7 +577,7 @@ class ListMovies():
     def update_cache_hash_opensubtitles(self):
     # Update cache_hash opensubtitles info
     # For movies which hash was not found in opensubtitles, will be tried
-    # again only 6 hours after
+    # again only 30 days
 
         cache = self.cache_hash
         
@@ -585,7 +586,7 @@ class ListMovies():
         for h in cache.keys():
             if cache[h]['o_title'] != None:
                 continue
-            if not cache[h]['o_check'] < time.time()-3600*6 :
+            if time.time() < cache[h]['o_check'] + 3600*24*30:
                 continue
             hashs.append(h)
 
@@ -1447,8 +1448,8 @@ class MovieListWindow(QMainWindow):
         layout = QVBoxLayout()
 
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(['Title', 'Filename', 'IMDB', 'IMDB Rating', 'Runtime', 'Subtitles', 'Play'])
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels(['Title', 'Filename', 'IMDB', 'IMDB Rating', 'Runtime', 'Added', 'Subtitles', 'Play'])
         self.table.setRowCount(len(self.files))
         self.table.verticalHeader().setVisible(False)
 
@@ -1458,8 +1459,9 @@ class MovieListWindow(QMainWindow):
         self.table.setColumnWidth(2, 300)  # IMDB Link
         self.table.setColumnWidth(3, 90)   # IMDB Rating
         self.table.setColumnWidth(4, 60)   # Runtime
-        self.table.setColumnWidth(5, 60)   # Subtitles
-        self.table.setColumnWidth(6, 60)   # Play
+        self.table.setColumnWidth(5, 100)  # Date added
+        self.table.setColumnWidth(6, 60)   # Subtitles
+        self.table.setColumnWidth(7, 60)   # Play
 
         for row, f in enumerate(self.files):
             h = self.lm.hash_from_path(f)
@@ -1494,21 +1496,28 @@ class MovieListWindow(QMainWindow):
                 runtime_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.table.setItem(row, 4, runtime_item)
 
+                # Date Added
+                ctime = os.path.getctime(f)
+                date_added = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d')
+                date_item = QTableWidgetItem(date_added)
+                date_item.setFlags(date_item.flags() & ~Qt.ItemIsEditable)
+                self.table.setItem(row, 5, date_item)
+
                 # Subtitles
                 has_subtitles = self.check_subtitles(f)
                 if has_subtitles:
                     subtitle_item = QTableWidgetItem('✓')
                     subtitle_item.setFlags(subtitle_item.flags() & ~Qt.ItemIsEditable)
-                    self.table.setItem(row, 5, subtitle_item)
+                    self.table.setItem(row, 6, subtitle_item)
                 else:
                     osd_button = QPushButton('OSD')
                     osd_button.clicked.connect(lambda _, file=f: self.run_osd(file))
-                    self.table.setCellWidget(row, 5, osd_button)
+                    self.table.setCellWidget(row, 6, osd_button)
 
                 # Play button
                 play_button = QPushButton('Play')
                 play_button.clicked.connect(lambda _, file=f: self.play_movie(file))
-                self.table.setCellWidget(row, 6, play_button)
+                self.table.setCellWidget(row, 7, play_button)
 
         layout.addWidget(self.table)
 
